@@ -10,7 +10,7 @@ stringx = require "pl.stringx";
 require "string";
 require "lfs";
 
-title = "### AMAR (Ask Me Any Rating) evaluator ###"
+title = "### AMAR 2.0 (Ask Me Any Rating) evaluator ###"
 
 print(title)
 
@@ -18,6 +18,9 @@ print(title)
 We expect to find in the JSON file the following parameters:
     - items: path of items descriptions
     - genres: filename of items genres
+    - directors: filename of items genres
+    - properties: filename of items genres
+    - wiki_categories: filename of items genres
     - models_mapping: dictionary which associates test files to models
     - predictions: generated predictions filename
     - batch_size: number of examples in a batch
@@ -46,12 +49,50 @@ test_filenames = conf_data["tests"]
 model_filenames = conf_data["models"]
 batch_size = conf_data["batch_size"]
 
+local genres_data
+local authors_data
+local directors_data
+local properties_data
+local wiki_categories_data
+
 if conf_data["genres"] then
     print("-- Loading genres data: ".. conf_data["genres"])
     genres_data = load_items_genres(conf_data["genres"], items_data["item2pos"])
 
     print("-- Padding genres data")
     genres_data["genres"] = pad_genres_data(genres_data)
+end
+
+if conf_data["authors"] then
+    print("-- Loading authors data: ".. conf_data["authors"])
+    authors_data = load_items_authors(conf_data["authors"], items_data["item2pos"])
+
+    print("-- Padding authors data")
+    authors_data["authors"] = pad_authors_data(authors_data)
+end
+
+if conf_data["directors"] then
+    print("-- Loading directors data: "..conf_data["directors"])
+    directors_data = load_items_directors(conf_data["directors"], items_data["item2pos"])
+
+    print("-- Padding directors data")
+    directors_data["directors"] = pad_directors_data(directors_data)
+end
+
+if conf_data["properties"] then
+    print("-- Loading properties data: "..conf_data["properties"])
+    properties_data = load_items_properties(conf_data["properties"], items_data["item2pos"])
+
+    print("-- Padding properties data")
+    properties_data["properties"] = pad_properties_data(properties_data)
+end
+
+if conf_data["wiki_categories"] then
+    print("-- Loading wiki_categories data: "..conf_data["wiki_categories"])
+    wiki_categories_data = load_items_wiki_categories(conf_data["wiki_categories"], items_data["item2pos"])
+
+    print("-- Padding wiki_categories data")
+    wiki_categories_data["wiki_categories"] = pad_wiki_categories_data(wiki_categories_data)
 end
 
 for num_folds=1, #test_filenames do
@@ -68,6 +109,7 @@ for num_folds=1, #test_filenames do
     local predictions = {}
 
     for t, v in ipairs(indices) do
+      if t < #indices then
         xlua.progress(t, #indices)
         
         curr_users_batch = test_data["ratings"]:index(1, v)[{ {}, { 1 } }]:cuda()
@@ -84,8 +126,7 @@ for num_folds=1, #test_filenames do
         local curr_users_batch = torch.reshape(curr_users_batch, batch_size)
 
         -- model inputs
-        local inputs = {curr_items_batch, curr_users_batch}
-        
+        local inputs = { curr_items_batch }
         
         if conf_data["genres"] then
             -- genres ids
@@ -93,8 +134,37 @@ for num_folds=1, #test_filenames do
             table.insert(inputs, curr_genres_batch)
         end
 
+        if conf_data["authors"] then
+            -- authors ids
+            local curr_authors_batch = authors_data["authors"]:index(1, curr_items_ids_batch):cuda()
+            table.insert(inputs, curr_authors_batch)
+        end
+
+
+        if conf_data["directors"] then
+            -- directors ids
+            local curr_directors_batch = directors_data["directors"]:index(1, curr_items_ids_batch):cuda()
+            table.insert(inputs, curr_directors_batch)
+        end
+
+        if conf_data["properties"] then
+            -- properties ids
+            local curr_properties_batch = properties_data["properties"]:index(1, curr_items_ids_batch):cuda()
+            table.insert(inputs, curr_properties_batch)
+        end
+
+        if conf_data["wiki_categories"] then
+            -- wiki_categories ids
+            local curr_wiki_categories_batch = wiki_categories_data["wiki_categories"]:index(1, curr_items_ids_batch):cuda()
+            table.insert(inputs, curr_wiki_categories_batch)
+        end
+
+        local users_batch = curr_users_batch
+
         local targets = model:forward(inputs)
         
+        curr_users_batch = users_batch
+
         if last_batch_size ~= nil then
           -- remove useless predictions used for batch padding
           targets = targets[{{1, last_batch_size}, {}}]
@@ -110,7 +180,7 @@ for num_folds=1, #test_filenames do
                 targets[index][1]
             })
         end
-
+     end
     end
 
     local function cmp_ratings(r1, r2)
@@ -136,7 +206,7 @@ for num_folds=1, #test_filenames do
             end
         end
         predictions_filename = string.format(conf_data["predictions"], topn, num_folds)
-
+        
         print("Writing predictions: "..predictions_filename)
         data.write(results, predictions_filename)
     end
